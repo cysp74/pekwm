@@ -47,7 +47,7 @@ const long Client::_clientEventMask = \
 std::vector<Client*> Client::_clients;
 std::vector<uint> Client::_clientids;
 
-Client::Client(Window new_client, ClientInitConfig &initConfig, bool is_new)
+Client::Client(Window new_client, bool is_new)
 	: PWinObj(true),
 	  _id(0),
 	  _size(0),
@@ -105,15 +105,15 @@ Client::Client(Window new_client, ClientInitConfig &initConfig, bool is_new)
 	// avoid auto-grouping to be to greedy.
 	getTransientForHint();
 
-	AutoProperty *ap =
-		readAutoprops(pekwm::isStarting() ? APPLY_ON_START : APPLY_ON_NEW);
+	ApplyOn apply_on = pekwm::isStarting() ? APPLY_ON_START : APPLY_ON_NEW;
+	AutoProperty *ap = readAutoprops(apply_on);
 	readHints();
 
 	// We need to set the state before acquiring a frame,
 	// so that Frame's state can match the state of the Client.
 	setInitialState();
 
-	initConfig.parent_is_new = findOrCreateFrame(ap);
+	bool parent_is_new = findOrCreateFrame(ap);
 
 	// Grab keybindings and mousebutton actions
 	pekwm::keyGrabber()->grabKeys(_window);
@@ -124,7 +124,7 @@ Client::Client(Window new_client, ClientInitConfig &initConfig, bool is_new)
 
 	X11::ungrabServer(true);
 
-	setClientInitConfig(initConfig, is_new, ap);
+	initClientInitConfig(is_new, parent_is_new, ap);
 
 	_alive = true;
 
@@ -175,7 +175,9 @@ Client::~Client(void)
 		X11::ungrabButton(AnyButton, AnyModifier, _window);
 		pekwm::keyGrabber()->ungrabKeys(_window);
 		XRemoveFromSaveSet(X11::getDpy(), _window);
-		PWinObj::mapWindow();
+		if (_init_config.initialized) {
+			PWinObj::mapWindow();
+		}
 	}
 
 	// free names and size hint
@@ -242,23 +244,19 @@ Client::findOrCreateFrame(AutoProperty *autoproperty)
 {
 	bool parent_is_new = false;
 
-	if (! _parent) {
-		findTaggedFrame();
+	if (! findTaggedFrame()) {
+	    findPreviousFrame();
 	}
-	if (! _parent) {
-		findPreviousFrame();
-	}
-
-	// Apply Autoproperties again to override EWMH state. It's done twice as
-	// we need the cfg_deny property when reading the EWMH state.
-	if (autoproperty != 0) {
+	if (autoproperty != nullptr) {
+		// Apply autoproperties again to override EWMH state. It is
+		// done twice as the cfg_deny property is required when reading
+		// the EWMH state.
 		applyAutoprops(autoproperty);
 		if (! _parent) {
 			findAutoGroupFrame(autoproperty);
 		}
 	}
 
-	// if we don't have a frame already, create a new one
 	if (! _parent) {
 		parent_is_new = true;
 		_parent = new Frame(this, autoproperty);
@@ -348,15 +346,9 @@ void
 Client::setInitialState(void)
 {
 	// Set state either specified in hint
-	ulong initial_state = getWMHints();
-	if (getWmState() == IconicState) {
+	long initial_state = getWMHints();
+	if (initial_state == IconicState || getWmState() == IconicState) {
 		_iconified = true;
-	}
-
-	if (_iconified || initial_state == IconicState) {
-		_iconified = true;
-		_mapped = true;
-		unmapWindow();
 	} else {
 		setWmState(initial_state);
 	}
@@ -366,22 +358,28 @@ Client::setInitialState(void)
  * Ensure the Client is (un) mapped and give input focus if requested.
  */
 void
-Client::setClientInitConfig(ClientInitConfig &initConfig, bool is_new,
-                            AutoProperty *prop)
+Client::initClientInitConfig(bool is_new, bool parent_is_new,
+			     AutoProperty *prop)
 {
-	initConfig.map = (! _iconified && _parent->isMapped());
-	initConfig.focus = false;
+	_init_config.parent_is_new = parent_is_new;
+	_init_config.map = ! _iconified;
+	if (_init_config.map && parent_is_new) {
+		_init_config.map =
+			_sticky || _workspace == Workspaces::getActive();
+	} else if (_init_config.map) {
+		_init_config.map = _parent->isMapped();
+	}
 
-	if (is_new && _parent->isMapped()) {
-		initConfig.focus = pekwm::config()->isFocusNew();
-		if (! initConfig.focus && _transient_for) {
-			initConfig.focus = _transient_for->isFocused()
+	if (is_new && _init_config.map) {
+		_init_config.focus = pekwm::config()->isFocusNew();
+		if (! _init_config.focus && _transient_for) {
+			_init_config.focus = _transient_for->isFocused()
 				&& pekwm::config()->isFocusNewChild();
 		}
 
 		// overwrite focus if set in the autoproperties
 		if (prop && prop->isMask(AP_FOCUS_NEW)) {
-			initConfig.focus = prop->focus_new;
+			_init_config.focus = prop->focus_new;
 		}
 	}
 }
@@ -570,41 +568,34 @@ Client::reparent(PWinObj *parent, int x, int y)
 ActionEvent*
 Client::handleMapRequest(XMapRequestEvent *ev)
 {
-	if (_parent && dynamic_cast<PDecor *>(_parent)) {
-		dynamic_cast<PDecor*>(_parent)->deiconify();
+	PDecor* parent = dynamic_cast<PDecor*>(_parent);
+	if (parent != nullptr) {
+		parent->deiconify();
 	}
-	return 0;
+	return nullptr;
 }
 
 ActionEvent*
 Client::handleUnmapEvent(XUnmapEvent *ev)
 {
-	if ((ev->window != ev->event) && (ev->send_event != true)) {
-		return 0;
+	if (ev->window == ev->event && ev->send_event == True) {
+		// ICCCM 4.1.4 advices the window manager to trigger the
+		// transition to Withdrawn state on real and synthetic
+		// UnmapNotify events.
+		setWmState(WithdrawnState);
+
+		// Extended Window Manager Hints 1.3 specifies that a window
+		// manager should remove the _NET_WM_STATE property when a
+		// window is withdrawn.
+		X11::unsetProperty(_window, STATE);
+
+		// Extended Window Manager Hints 1.3 specifies that a window
+		// manager should remove the _NET_WM_DESKTOP property when a
+		// window is withdrawn.  (to allow legacy applications to reuse
+		// a withdrawn window)
+		X11::unsetProperty(_window, NET_WM_DESKTOP);
 	}
-
-	// The window might not exist any more, so just ignore the errors.
-	setXErrorsIgnore(true);
-
-	// ICCCM 4.1.4 advices the window manager to trigger the transition to
-	// Withdrawn state on real and synthetic UnmapNotify events.
-	setWmState(WithdrawnState);
-
-	// Extended Window Manager Hints 1.3 specifies that a window manager
-	// should remove the _NET_WM_STATE property when a window is withdrawn.
-	X11::unsetProperty(_window, STATE);
-
-	// Extended Window Manager Hints 1.3 specifies that a window manager
-	// should remove the _NET_WM_DESKTOP property when a window is withdrawn.
-	// (to allow legacy applications to reuse a withdrawn window)
-	X11::unsetProperty(_window, NET_WM_DESKTOP);
-
-	// FIXME: Listen mask should change as this doesn't work?
-	_alive = false;
-	delete this;
-
-	setXErrorsIgnore(false);
-	return 0;
+	return nullptr;
 }
 
 // END - PWinObj interface.
@@ -768,14 +759,15 @@ Client::validate(void)
 	return true;
 }
 
-//! @brief Checks if the window has attribute IsViewable set
+/**
+ * Return true if the window has attribute IsViewable set
+ */
 bool
 Client::isViewable(void)
 {
-	XWindowAttributes attr;
-	XGetWindowAttributes(X11::getDpy(), _window, &attr);
-
-	return (attr.map_state == IsViewable);
+	XWindowAttributes wa;
+	X11::getWindowAttributes(_window, wa);
+	return wa.map_state == IsViewable;
 }
 
 /**
@@ -1277,14 +1269,9 @@ Client::titleFindID(std::string &title)
 void
 Client::setWmState(ulong state)
 {
-	ulong data[2];
-
-	data[0] = state;
-	data[1] = None; // No Icon
-
+	ulong data[2] = { state, None };  // No Icon
 	X11::changeProperty(_window,
-			    X11::getAtom(WM_STATE),
-			    X11::getAtom(WM_STATE),
+			    X11::getAtom(WM_STATE), X11::getAtom(WM_STATE),
 			    32, PropModeReplace, (uchar*) data, 2);
 }
 
@@ -1296,23 +1283,14 @@ Client::setWmState(ulong state)
 long
 Client::getWmState(void)
 {
-	Atom real_type;
-	int real_format;
-	long *data, state = WithdrawnState;
-	ulong items_read, items_left;
-	uchar *udata;
-
-	int status =
-		XGetWindowProperty(X11::getDpy(), _window, X11::getAtom(WM_STATE),
-				   0L, 2L, False, X11::getAtom(WM_STATE),
-				   &real_type, &real_format, &items_read, &items_left,
-				   &udata);
-	if ((status  == Success) && items_read) {
-		data = reinterpret_cast<long*>(udata);
-		state = *data;
+	long state = WithdrawnState;
+	uchar *udata = nullptr;
+	if (X11::getProperty(_window,
+			     X11::getAtom(WM_STATE), X11::getAtom(WM_STATE),
+			     2L, &udata, 0)) {
+		state = *reinterpret_cast<long*>(udata);
 		X11::free(udata);
 	}
-
 	return state;
 }
 

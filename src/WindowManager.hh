@@ -1,6 +1,6 @@
 //
 // WindowManager.hh for pekwm
-// Copyright (C) 2003-2020 Claes Nästén <pekdon@gmail.com>
+// Copyright (C) 2003-2022 Claes Nästén <pekdon@gmail.com>
 //
 // windowmanager.hh for aewm++
 // Copyright (C) 2000 Frank Hale <frankhale@yahoo.com>
@@ -98,9 +98,10 @@ private:
 
 	PWinObj *updateWoForFrameClick(XButtonEvent *ev, PWinObj *orig_wo);
 
+	void handleCreateNotify(XCreateWindowEvent *ev);
+	void handleDestroyWindowEvent(XDestroyWindowEvent *ev);
 	void handleMapRequestEvent(XMapRequestEvent *ev);
 	void handleUnmapEvent(XUnmapEvent *ev);
-	void handleDestroyWindowEvent(XDestroyWindowEvent *ev);
 
 	void handleConfigureRequestEvent(XConfigureRequestEvent *ev);
 	void handleClientMessageEvent(XClientMessageEvent *ev);
@@ -126,6 +127,7 @@ private:
 	void initHints(void);
 
 	Client *createClient(Window window, bool is_new);
+	void initClient(Client *client);
 
 protected:
 	/** pekwm_cmd buffer for commands that do not fit in 20 bytes. */

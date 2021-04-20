@@ -29,17 +29,20 @@ populateWvec(const PWinObj *wo, std::vector<PWinObj*> &wvec)
 		// Windows that are not mapped, desktop windows and iconified
 		// windows are excludes.
 		enum PWinObj::Type it_type = (*it)->getType();
+		if (it_type != PWinObj::WO_FRAME
+		    && it_type != PWinObj::WO_MENU) {
+			continue;
+		}
+
 		if (wo == (*it)
 		    || ! (*it)->isMapped()
-		    || ! (it_type == PWinObj::WO_FRAME
-			  || it_type == PWinObj::WO_MENU)
 		    || ((*it)->getLayer() == LAYER_DESKTOP)) {
 			continue;
 		}
 
 		// Skip windows tagged as Maximized as they cause no space
 		// to be found.
-		if ((*it)->getType() == PWinObj::WO_FRAME) {
+		if (it_type == PWinObj::WO_FRAME) {
 			Frame *frame = static_cast<Frame*>(*it);
 			Client *client = frame->getActiveClient();
 			if (client &&

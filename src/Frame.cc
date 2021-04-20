@@ -1,6 +1,6 @@
 //
 // Frame.cc for pekwm
-// Copyright (C) 2002-2020 Claes Nästén <pekdon@gmail.com>
+// Copyright (C) 2002-2022 Claes Nästén <pekdon@gmail.com>
 //
 // This program is licensed under the GNU GPL.
 // See the LICENSE file for more information.
@@ -8,33 +8,17 @@
 
 #include "config.h"
 
-#include <algorithm>
-#include <cstdio>
-#include <functional>
-#include <iostream>
-
-extern "C" {
-#include <X11/Xatom.h>
-}
-
-#include "Debug.hh"
-#include "PWinObj.hh"
-#include "PDecor.hh"
-#include "Frame.hh"
-
-#include "Charset.hh"
-#include "Compat.hh"
-#include "X11.hh"
-#include "Config.hh"
 #include "ActionHandler.hh"
 #include "AutoProperties.hh"
+#include "Charset.hh"
+#include "Compat.hh"
+#include "Debug.hh"
 #include "Client.hh"
 #include "ClientMgr.hh"
 #include "ManagerWindows.hh"
-#include "StatusWindow.hh"
 #include "Workspaces.hh"
 #include "KeyGrabber.hh"
-#include "Theme.hh"
+#include "X11.hh"
 #include "X11Util.hh"
 
 std::vector<Frame*> Frame::_frames;
@@ -106,13 +90,14 @@ Frame::Frame(Client *client, AutoProperty *ap)
 		setTitlebar(STATE_UNSET);
 	}
 
-	// We first get the size of the window as it will be needed when placing
+	// First get the size of the window as it will be needed when placing
 	// the window with the help of WinGravity.
 	resizeChild(client->getWidth(), client->getHeight());
 
 	// setup position
 	bool place = false;
-	if (client->isViewable() || client->isPlaced()
+	if (client->isViewable()
+	    || client->isPlaced()
 	    || (client->cameWithPosition()
 		&& ! client->isCfgDeny(CFG_DENY_POSITION))) {
 		moveChild(client->getX(), client->getY());
@@ -171,7 +156,7 @@ Frame::Frame(Client *client, AutoProperty *ap)
 	client->configureRequestSend();
 
 	// Figure out if we should be hidden or not, do not read autoprops
-	PDecor::setWorkspace(_client->getWorkspace());
+	_workspace = _client->getWorkspace();
 
 	woListAdd(this);
 	_wo_map[_window] = this;
@@ -1008,6 +993,13 @@ Frame::detachClient(Client *client, int x, int y)
 		return nullptr;
 	}
 
+	// update the client state before detaching to get the size etc
+	// matching what currently is being displayed if the client detached
+	// is not the active one
+	if (_client != client) {
+		client->resize(_client->getWidth(), _client->getHeight());
+		applyState(client);
+	}
 	removeChild(client);
 
 	client->move(x, y + bdTop(this));
@@ -1016,6 +1008,7 @@ Frame::detachClient(Client *client, int x, int y)
 	frame->workspacesInsert();
 	client->setParent(frame);
 	client->setWorkspace(Workspaces::getActive());
+	frame->mapWindow();
 
 	setFocused(false);
 

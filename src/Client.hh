@@ -43,8 +43,16 @@ public:
 
 class ClientInitConfig {
 public:
+	ClientInitConfig(void)
+		: initialized(false),
+		  focus(false),
+		  map(false),
+		  parent_is_new(false)
+	{
+	}
+
+	bool initialized;
 	bool focus;
-	bool focus_parent;
 	bool map;
 	bool parent_is_new;
 };
@@ -61,8 +69,7 @@ public: // Public Member Functions
 	typedef client_vec::iterator client_it;
 	typedef client_vec::const_iterator client_cit;
 
-	Client(Window new_client, ClientInitConfig &initConfig,
-	       bool is_new = false);
+	Client(Window new_client, bool is_new = false);
 	virtual ~Client(void);
 
 	// START - PWinObj interface.
@@ -127,6 +134,7 @@ public: // Public Member Functions
 	client_cit getTransientsEnd(void) const { return _transients.end(); }
 	// END - Iterators
 
+	ClientInitConfig& getClientInitConfig(void) { return _init_config; }
 	bool validate(void);
 
 	inline uint getClientID(void) { return _id; }
@@ -294,8 +302,8 @@ private:
 	bool findAutoGroupFrame(AutoProperty *autoproperty);
 
 	void setInitialState(void);
-	void setClientInitConfig(ClientInitConfig &initConfig, bool is_new,
-				 AutoProperty *autoproperty);
+	void initClientInitConfig(bool is_new, bool parent_is_new,
+				  AutoProperty *autoproperty);
 
 	bool titleApplyRule(std::string &wtitle);
 	uint titleFindID(std::string &wtitle);
@@ -327,7 +335,8 @@ private:
 	static uint findClientID(void);
 	static void returnClientID(uint id);
 
-private: // Private Member Variables
+private:
+	ClientInitConfig _init_config;
 	uint _id; //<! Unique ID of the Client.
 
 	XSizeHints *_size;

@@ -326,8 +326,13 @@ WindowManager::scanWindows(void)
 	}
 
 	for (it = win_list.begin(); it != win_list.end(); ++it) {
-		if (*it != None) {
-			createClient(*it, false);
+		if (*it == None) {
+			continue;
+		}
+
+		Client *client = createClient(*it, false);
+		if (client) {
+			initClient(client);
 		}
 	}
 
@@ -741,6 +746,9 @@ WindowManager::handleEvent(XEvent &ev)
 	static ScreenChangeNotification scn;
 
 	switch (ev.type) {
+	case CreateNotify:
+		handleCreateNotify(&ev.xcreatewindow);
+		break;
 	case MapRequest:
 		handleMapRequestEvent(&ev.xmaprequest);
 		break;
@@ -1091,15 +1099,60 @@ WindowManager::handleMotionEvent(XMotionEvent *ev)
 }
 
 void
-WindowManager::handleMapRequestEvent(XMapRequestEvent *ev)
+WindowManager::handleCreateNotify(XCreateWindowEvent *ev)
 {
+	if (ev->override_redirect) {
+		return;
+	}
+
 	PWinObj *wo = PWinObj::findPWinObj(ev->window);
-	if (wo) {
-		wo->handleMapRequest(ev);
-	} else {
+	if (wo == nullptr) {
 		createClient(ev->window, true);
 	}
 }
+
+void
+WindowManager::handleDestroyWindowEvent(XDestroyWindowEvent *ev)
+{
+	Client *client = Client::findClientFromWindow(ev->window);
+
+	if (client) {
+		PWinObj *wo_search = client->getParent();
+		client->handleDestroyEvent(ev);
+
+		if (! PWinObj::getFocusedPWinObj()) {
+			Workspaces::findWOAndFocus(wo_search);
+		}
+	} else {
+		DockApp *da = pekwm::harbour()->findDockApp(ev->window);
+		if (da) {
+			da->setAlive(false);
+			pekwm::harbour()->removeDockApp(da);
+		}
+	}
+}
+
+void
+WindowManager::handleMapRequestEvent(XMapRequestEvent *ev)
+{
+	PWinObj *wo = PWinObj::findPWinObj(ev->window);
+	if (wo == nullptr) {
+		return;
+	}
+
+	if (wo->getType() == PWinObj::WO_CLIENT) {
+		Client *client = static_cast<Client*>(wo);
+		ClientInitConfig &ic = client->getClientInitConfig();
+		if (ic.initialized) {
+			client->handleMapRequest(ev);
+		} else {
+			ic.initialized = true;
+			initClient(client);
+		}
+	} else {
+		wo->handleMapRequest(ev);
+	}
+ }
 
 void
 WindowManager::handleUnmapEvent(XUnmapEvent *ev)
@@ -1134,27 +1187,6 @@ WindowManager::handleUnmapEvent(XUnmapEvent *ev)
 	    && wo_type != PWinObj::WO_SEARCH_DIALOG
 	    && ! PWinObj::getFocusedPWinObj()) {
 		Workspaces::findWOAndFocus(wo_search);
-	}
-}
-
-void
-WindowManager::handleDestroyWindowEvent(XDestroyWindowEvent *ev)
-{
-	Client *client = Client::findClientFromWindow(ev->window);
-
-	if (client) {
-		PWinObj *wo_search = client->getParent();
-		client->handleDestroyEvent(ev);
-
-		if (! PWinObj::getFocusedPWinObj()) {
-			Workspaces::findWOAndFocus(wo_search);
-		}
-	} else {
-		DockApp *da = pekwm::harbour()->findDockApp(ev->window);
-		if (da) {
-			da->setAlive(false);
-			pekwm::harbour()->removeDockApp(da);
-		}
 	}
 }
 
@@ -1439,11 +1471,12 @@ WindowManager::handleExposeEvent(XExposeEvent *ev)
 Client*
 WindowManager::createClient(Window window, bool is_new)
 {
-	XWindowAttributes attr;
-	X11::getWindowAttributes(window, attr);
-	if (attr.override_redirect
-	    || (! is_new && attr.map_state == IsUnmapped)) {
-		return nullptr;
+	if (! is_new) {
+		XWindowAttributes attr;
+		X11::getWindowAttributes(window, attr);
+		if (attr.override_redirect) {
+			return nullptr;
+		}
 	}
 
 	XWMHints wm_hints;
@@ -1454,33 +1487,39 @@ WindowManager::createClient(Window window, bool is_new)
 		return nullptr;
 	}
 
-	ClientInitConfig initConfig;
-	Client *client = new Client(window, initConfig, is_new);
-	if (! client->isAlive()) {
-		delete client;
-		return nullptr;
+	Client *client = new Client(window, is_new);
+	if (client->isAlive()) {
+		return client;
 	}
+	delete client;
+	return nullptr;
+}
 
-	if (initConfig.parent_is_new) {
-		PWinObj *wo = client->getParent();
-		Workspaces::handleFullscreenBeforeRaise(wo);
-		Workspaces::insert(wo, true);
-	}
-	Workspaces::updateClientList();
+void
+WindowManager::initClient(Client *client)
+{
+	ClientInitConfig &ic = client->getClientInitConfig();
 
 	// Make sure the window is mapped, this is done after it has been
 	// added to the decor/frame as otherwise IsViewable state won't
 	// be correct and we don't know whether or not to place the window
-	if (initConfig.map) {
-		client->mapWindow();
+	if (ic.map) {
+		client->getParent()->mapWindow();
+	}
+
+	if (ic.parent_is_new) {
+		Frame *frame = static_cast<Frame*>(client->getParent());
+		Workspaces::handleFullscreenBeforeRaise(frame);
+		Workspaces::insert(frame);
+		Workspaces::updateClientList();
 	}
 
 	// Focus was requested by the configuration, look out for
 	// focus stealing.
-	if (initConfig.focus) {
+	if (ic.focus) {
 		PWinObj *wo = PWinObj::getFocusedPWinObj();
 		Time time_protect =
-			static_cast<Time>(pekwm::config()->getFocusStealProtect());
+		    static_cast<Time>(pekwm::config()->getFocusStealProtect());
 
 		if (wo != nullptr
 		    && wo->isMapped()
@@ -1494,8 +1533,6 @@ WindowManager::createClient(Window window, bool is_new)
 			client->getParent()->giveInputFocus();
 		}
 	}
-
-	return client;
 }
 
 void
