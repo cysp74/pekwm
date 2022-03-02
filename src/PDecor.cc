@@ -34,6 +34,15 @@ extern "C" {
 #include "X11.hh"
 #include "X11Util.hh"
 
+static Window createWindow(Window parent, int x, int y, int w, int h,
+			   CreateWindowParams &params)
+{
+	return X11::createWindow(parent, x, y, w, h, 0,
+				 params.depth, InputOutput, params.visual,
+				 params.mask, &params.attr);
+	
+}
+
 // PDecor::Button
 
 //! @brief PDecor::Button constructor
@@ -277,10 +286,9 @@ PDecor::createParentWindow(CreateWindowParams &params, Window child_window)
 	params.attr.event_mask = ButtonPressMask|ButtonReleaseMask|
 		ButtonMotionMask|EnterWindowMask|SubstructureRedirectMask|
 		SubstructureNotifyMask;
-	_window = X11::createWindow(X11::getRoot(),
-				    _gm.x, _gm.y, _gm.width, _gm.height, 0,
-				    params.depth, InputOutput, params.visual,
-				    params.mask, &params.attr);
+	_window = createWindow(X11::getRoot(),
+			       _gm.x, _gm.y, _gm.width, _gm.height,
+			       params);
 
 	if (params.mask & CWColormap) {
 		XFreeColormap(X11::getDpy(), params.attr.colormap);
@@ -298,10 +306,8 @@ PDecor::createTitle(CreateWindowParams &params)
 {
 	params.attr.event_mask = ButtonPressMask|ButtonReleaseMask|
 		ButtonMotionMask|EnterWindowMask;
-	Window title = X11::createWindow(_window,
-					 bdLeft(this), bdTop(this), 1, 1, 0,
-					 params.depth, InputOutput, params.visual,
-					 params.mask, &params.attr);
+	Window title =
+		createWindow(_window, bdLeft(this), bdTop(this), 1, 1, params);
 	_title_wo.setWindow(title);
 	addChildWindow(_title_wo.getWindow());
 	_title_wo.mapWindow();
@@ -315,16 +321,14 @@ PDecor::createBorder(CreateWindowParams &params)
 {
 	params.attr.event_mask = ButtonPressMask|ButtonReleaseMask|
 		ButtonMotionMask|EnterWindowMask;
-
+	params.mask |= CWCursor;
 	for (uint i = 0; i < BORDER_NO_POS; ++i) {
 		params.attr.cursor = X11::getCursor(CursorType(i));
-
 		_border_win[i] =
-			X11::createWindow(_window, -1, -1, 1, 1, 0,
-					  params.depth, InputOutput, params.visual,
-					  params.mask|CWCursor, &params.attr);
+			createWindow(_window, -1, -1, 1, 1, params);
 		addChildWindow(_border_win[i]);
 	}
+	params.mask &= ~CWCursor;
 }
 
 //! @brief PDecor destructor
