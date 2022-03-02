@@ -355,6 +355,8 @@ public:
 
 	static bool getNextEvent(XEvent &ev, struct timeval *timeout = nullptr);
 	static void allowEvents(int event_mode, Time time);
+	static void setReplayPointerRequest(bool request);
+	static void replayPointerIfRequested(Time time);
 	static bool grabServer(void);
 	static bool ungrabServer(bool sync);
 	static bool grabKeyboard(Window win);
@@ -559,6 +561,7 @@ private:
 	static uint _server_grabs;
 
 	static Time _last_event_time;
+	static bool _replay_pointer_request;
 	// information for dobule clicks
 	static Window _last_click_id;
 	static Time _last_click_time[BUTTON_NO - 1];

@@ -952,6 +952,10 @@ WindowManager::handleButtonPressEvent(XButtonEvent *ev)
 			harbour->handleButtonEvent(ev, da);
 		}
 	}
+
+	// replay pointer events unless the actions performed grab
+	// the pointer.
+	X11::replayPointerIfRequested(ev->time);
 }
 
 void

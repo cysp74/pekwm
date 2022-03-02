@@ -626,30 +626,31 @@ PDecor::handleButtonPress(XButtonEvent *ev)
 ActionEvent*
 PDecor::handleButtonPressDecor(XButtonEvent *ev)
 {
+	Window child_win = _child->getWindow();
+
 	// Allow us to get clicks from anywhere on the window.
-	if (_decor_cfg_bpr_replay_pointer && ev->window == _window) {
-		X11::allowEvents(ReplayPointer, CurrentTime);
+	if (_decor_cfg_bpr_replay_pointer) {
+		X11::setReplayPointerRequest(true);
 	}
 
 	std::vector<ActionEvent> *actions = nullptr;
 	Config *cfg = pekwm::config();
-	if (ev->window == _child->getWindow()
-	    || (ev->state == 0 && ev->subwindow == _child->getWindow())) {
+	if (ev->subwindow == child_win) {
 		// press on the child window (not the actual decor), if the
 		// match was against the subwindow the check against zero
 		// state is required to avoid duplicate actions to trigger.
-		_button_press_win = _child->getWindow();
+		_button_press_win = ev->subwindow;
 		actions = cfg->getMouseActionList(_decor_cfg_bpr_al_child);
-	} else if (_title_wo == ev->window) {
+	} else if (_title_wo == ev->subwindow) {
 		// press on the decor title
-		_button_press_win = ev->window;
+		_button_press_win = ev->subwindow;
 		actions = cfg->getMouseActionList(_decor_cfg_bpr_al_title);
 	} else {
 		// press on decor border, default case. Try both window and
 		// sub-window.
-		uint pos = getBorderPosition(ev->window);
+		uint pos = getBorderPosition(ev->subwindow);
 		if (pos != BORDER_NO_POS) {
-			_button_press_win = ev->window;
+			_button_press_win = ev->subwindow;
 			actions = cfg->getBorderListFromPosition(pos);
 		}
 	}
@@ -708,6 +709,7 @@ PDecor::handleButtonReleaseDecor(XButtonEvent *ev)
 	// was pressed on to allow button release events to be triggered
 	if (ev->window != _button_press_win
 	    && ev->subwindow != _button_press_win) {
+		_button_press_win = None;
 		return nullptr;
 	}
 

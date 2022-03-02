@@ -672,6 +672,30 @@ X11::allowEvents(int event_mode, Time time)
 	}
 }
 
+/**
+ * Set to true from event handlers, delaying the actual replay until actions
+ * have been executed and if no pointer was grabbed replay is then done from
+ * the window manager event handler.
+ */
+void
+X11::setReplayPointerRequest(bool request)
+{
+	_replay_pointer_request = request;
+}
+
+/**
+ * Used in button press handling to only allow events on clicks when no action
+ * grabs the button.
+ */
+void
+X11::replayPointerIfRequested(Time time)
+{
+	if (_replay_pointer_request) {
+		allowEvents(ReplayPointer, time);
+		setReplayPointerRequest(false);
+	}
+}
+
 //! @brief Grabs the server, counting number of grabs
 bool
 X11::grabServer(void)
@@ -734,6 +758,7 @@ X11::grabPointer(Window win, uint event_mask, CursorType type)
 	Cursor cursor = type < CURSOR_NONE ? _cursor_map[type] : None;
 	if (XGrabPointer(_dpy, win, false, event_mask, GrabModeAsync, GrabModeAsync,
 			 None, cursor, CurrentTime) == GrabSuccess) {
+		setReplayPointerRequest(false);
 		return true;
 	}
 	P_ERR("failed to grab pointer on " << win
@@ -2075,8 +2100,9 @@ int X11::_event_xrandr = -1;
 uint X11::_num_lock;
 uint X11::_scroll_lock;
 std::vector<Head> X11::_heads;
-uint X11::_server_grabs;
-Time X11::_last_event_time;
+uint X11::_server_grabs = 0;
+Time X11::_last_event_time = 0;
+bool X11::_replay_pointer_request = false;
 Window X11::_last_click_id = None;
 Time X11::_last_click_time[BUTTON_NO - 1];
 std::vector<X11::ColorEntry*> X11::_colors;
